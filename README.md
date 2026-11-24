@@ -21,7 +21,7 @@ Toca el carro (o el engrane) para elegir **marca, tipo (sedán, hatchback, SUV, 
 ## Compilar el APK (sin instalar nada)
 1. Sube esta carpeta a un repositorio de GitHub.
 2. GitHub Actions compila solo (pestaña **Actions → Compilar APK**).
-3. Descarga el artefacto **ArtefgoMetro-APK** y copia el `.apk` a una USB.
+3. Descarga `ArtefgoMetro.apk` desde **Releases → latest** y cópialo a una USB.
 
 También puedes abrir el proyecto en Android Studio y darle *Run*.
 
