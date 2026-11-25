@@ -102,7 +102,7 @@ fun DrawScope.drawCar(
     val s = SPECS.getValue(body)
     val u = length / 100f
     val d = daylight.coerceIn(0f, 1f)
-    val lit = 0.38f + 0.62f * d
+    val lit = 0.58f + 0.42f * d
     val base = lerp(Color.Black, paint, lit)
 
     fun x(v: Float) = left + v * u
@@ -127,6 +127,7 @@ fun DrawScope.drawCar(
             }
             close()
         }
+        p.color = android.graphics.Color.WHITE   // opaco: el alpha del Paint multiplica al shader
         p.pathEffect = CornerPathEffect(3.5f * u)
         p.shader = LinearGradient(
             0f, y(s.height), 0f, y(6f),
@@ -139,6 +140,15 @@ fun DrawScope.drawCar(
         )
         c.drawPath(bodyPath, p)
         p.shader = null
+        if (d < 0.6f) {
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = 0.5f * u
+            p.color = Color(0xFFB8C8FF).copy(alpha = 0.35f * (1f - d)).toArgb()
+            p.pathEffect = CornerPathEffect(3.5f * u)
+            c.drawPath(bodyPath, p)
+            p.style = Paint.Style.FILL
+            p.pathEffect = null
+        }
 
         // Molduras plásticas inferiores (SUV / mini SUV)
         if (s.cladding) {
@@ -171,6 +181,7 @@ fun DrawScope.drawCar(
         p.style = Paint.Style.FILL
 
         // Ventanas
+        p.color = android.graphics.Color.WHITE
         p.pathEffect = CornerPathEffect(1.4f * u)
         p.shader = LinearGradient(
             0f, y(s.height), 0f, y(s.belt),
@@ -219,6 +230,7 @@ fun DrawScope.drawCar(
 
         if (lightsOn) {
             val hx = x(h[2]); val hy = (y(h[1]) + y(h[3])) / 2f
+            p.color = android.graphics.Color.WHITE
             p.shader = RadialGradient(hx, hy, 7f * u, intArrayOf(0xAAFFF1B8.toInt(), 0x00FFF1B8), null, Shader.TileMode.CLAMP)
             c.drawCircle(hx, hy, 7f * u, p)
             val tx = x(t[0]); val ty = (y(t[1]) + y(t[3])) / 2f
@@ -232,6 +244,7 @@ fun DrawScope.drawCar(
                 lineTo(hx, hy + 1.2f * u)
                 close()
             }
+            p.color = android.graphics.Color.WHITE
             p.shader = LinearGradient(hx, 0f, hx + 75f * u, 0f, 0x66FFF1B8, 0x00FFF1B8, Shader.TileMode.CLAMP)
             c.drawPath(beam, p)
             p.shader = null

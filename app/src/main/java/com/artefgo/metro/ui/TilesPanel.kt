@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -22,13 +23,24 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,39 +55,70 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.artefgo.metro.data.AppEntry
-import com.artefgo.metro.data.AppsRepository
+import com.artefgo.metro.data.StartLayout
+import com.artefgo.metro.data.TileCfg
 
-/** Panel izquierdo: mosaicos estilo Windows Phone con las apps instaladas. */
+/** Acciones de edición de un mosaico. */
+class TileActions(
+    val launch: (AppEntry) -> Unit,
+    val togglePin: (String) -> Unit,
+    val move: (String, Int) -> Unit,
+    val cycleSize: (String) -> Unit,
+    val cycleColor: (String) -> Unit,
+    val rename: (String, String?) -> Unit,
+    val hide: (String) -> Unit,
+    val uninstall: (String) -> Unit,
+    val info: (AppEntry) -> Unit
+)
+
+/** Panel izquierdo: mosaicos estilo Windows Phone. Mantén presionado para editar. */
 @Composable
 fun TilesPanel(
     apps: List<AppEntry>,
-    pinned: List<String>?,
-    wide: Set<String>?,
-    onLaunch: (AppEntry) -> Unit,
-    onTogglePin: (AppEntry) -> Unit,
-    onToggleWide: (AppEntry) -> Unit,
-    onInfo: (AppEntry) -> Unit,
+    layout: StartLayout,
+    defaultTiles: List<TileCfg>,
+    editMode: Boolean,
+    onEditMode: (Boolean) -> Unit,
+    actions: TileActions,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val pinnedList = pinned ?: AppsRepository.defaultPinned(apps)
-    val wideSet = wide ?: pinnedList.take(2).toSet()
-    val byPkg = remember(apps) { apps.associateBy { it.packageName } }
-    val pinnedApps = pinnedList.mapNotNull { byPkg[it] }
-    val others = apps.filter { it.packageName !in pinnedList }
-
     val theme = LocalLauncherTheme.current
+    val wallpaper = LocalHasWallpaper.current
+    var selected by remember { mutableStateOf<String?>(null) }
+    var renaming by remember { mutableStateOf<AppEntry?>(null) }
+
+    val visible = apps.filter { it.packageName !in layout.hidden }
+    val byPkg = visible.associateBy { it.packageName }
+    val tiles = (layout.tiles ?: defaultTiles).filter { byPkg.containsKey(it.pkg) }
+    val pinnedPkgs = tiles.map { it.pkg }.toSet()
+    val others = visible.filter { it.packageName !in pinnedPkgs }
+    LaunchedEffect(editMode) { if (!editMode) selected = null }
+
+    fun labelOf(a: AppEntry) = layout.labels[a.packageName] ?: a.label
+    fun colorOf(a: AppEntry): Color {
+        val c = layout.colors[a.packageName]?.let { Color(it) } ?: theme.tileColor(a.packageName)
+        return if (wallpaper) c.copy(alpha = c.alpha * 0.85f) else c
+    }
+
     Column(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "inicio", color = theme.text, fontSize = 30.sp, fontWeight = FontWeight.Light,
-                modifier = Modifier.weight(1f)
+                if (editMode) "editar inicio" else "inicio", color = theme.text, fontSize = 30.sp,
+                fontWeight = FontWeight.Light, modifier = Modifier.weight(1f)
             )
-            IconButton(onClick = onOpenSettings) {
-                Icon(Icons.Outlined.Settings, contentDescription = "Configuración", tint = theme.text)
+            if (editMode) {
+                TextButton(onClick = { onEditMode(false) }) { Text("Listo", fontSize = 16.sp) }
+            } else {
+                IconButton(onClick = { onEditMode(true) }) {
+                    Icon(Icons.Filled.Edit, contentDescription = "Editar", tint = theme.text)
+                }
+                IconButton(onClick = onOpenSettings) {
+                    Icon(Icons.Outlined.Settings, contentDescription = "Configuración", tint = theme.text)
+                }
             }
         }
-        BoxWithConstraints(Modifier.fillMaxSize()) {
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             val gap = 6.dp
             val tile = (maxWidth - gap * 2) / 3
             LazyVerticalGrid(
@@ -85,14 +128,16 @@ fun TilesPanel(
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(
-                    pinnedApps,
-                    key = { "p_" + it.component.flattenToString() },
-                    span = { GridItemSpan(if (it.packageName in wideSet) 2 else 1) }
-                ) { app ->
+                    tiles,
+                    key = { "p_" + it.pkg },
+                    span = { GridItemSpan(if (it.size == 0) 1 else 2) }
+                ) { cfg ->
+                    val app = byPkg.getValue(cfg.pkg)
                     Tile(
-                        app, wide = app.packageName in wideSet, pinned = true, height = tile,
-                        onClick = { onLaunch(app) }, onTogglePin = { onTogglePin(app) },
-                        onToggleWide = { onToggleWide(app) }, onInfo = { onInfo(app) }
+                        app = app, label = labelOf(app), color = colorOf(app), size = cfg.size,
+                        unit = tile, gap = gap, editMode = editMode, selected = selected == app.packageName,
+                        onClick = { if (editMode) selected = app.packageName else actions.launch(app) },
+                        onLongClick = { onEditMode(true); selected = app.packageName }
                     )
                 }
                 if (others.isNotEmpty()) {
@@ -105,13 +150,53 @@ fun TilesPanel(
                 }
                 items(others, key = { "o_" + it.component.flattenToString() }) { app ->
                     Tile(
-                        app, wide = false, pinned = false, height = tile,
-                        onClick = { onLaunch(app) }, onTogglePin = { onTogglePin(app) },
-                        onToggleWide = {}, onInfo = { onInfo(app) }
+                        app = app, label = labelOf(app), color = colorOf(app), size = 0,
+                        unit = tile, gap = gap, editMode = editMode, selected = selected == app.packageName,
+                        onClick = { if (editMode) selected = app.packageName else actions.launch(app) },
+                        onLongClick = { onEditMode(true); selected = app.packageName }
                     )
                 }
             }
         }
+
+        if (editMode) {
+            val sel = selected?.let { s -> visible.firstOrNull { it.packageName == s } }
+            EditToolbar(
+                title = sel?.let { "“${labelOf(it)}”" } ?: "Toca un mosaico para editarlo",
+                enabled = sel != null
+            ) {
+                if (sel != null) {
+                    val pkg = sel.packageName
+                    val pinned = pkg in pinnedPkgs
+                    if (pinned) {
+                        ToolButton(Icons.AutoMirrored.Filled.ArrowBack, "Antes") { actions.move(pkg, -1) }
+                        ToolButton(Icons.AutoMirrored.Filled.ArrowForward, "Después") { actions.move(pkg, 1) }
+                        ToolButton(Icons.Filled.AspectRatio, "Tamaño") { actions.cycleSize(pkg) }
+                    }
+                    ToolButton(Icons.Filled.PushPin, if (pinned) "Desanclar" else "Anclar") { actions.togglePin(pkg) }
+                    ToolButton(Icons.Filled.Palette, "Color") { actions.cycleColor(pkg) }
+                    ToolButton(Icons.Filled.Edit, "Nombre") { renaming = sel }
+                    ToolButton(Icons.Filled.VisibilityOff, "Ocultar") { actions.hide(pkg); selected = null }
+                    ToolButton(Icons.Filled.Info, "Info") { actions.info(sel) }
+                    ToolButton(Icons.Filled.Delete, "Desinstalar") { actions.uninstall(pkg) }
+                }
+            }
+        }
+    }
+
+    renaming?.let { app ->
+        var text by remember(app.packageName) { mutableStateOf(labelOf(app)) }
+        AlertDialog(
+            onDismissRequest = { renaming = null },
+            title = { Text("Cambiar nombre") },
+            text = { OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true) },
+            confirmButton = {
+                TextButton(onClick = { actions.rename(app.packageName, text); renaming = null }) { Text("Guardar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { actions.rename(app.packageName, null); renaming = null }) { Text("Nombre original") }
+            }
+        )
     }
 }
 
@@ -119,20 +204,26 @@ fun TilesPanel(
 @Composable
 private fun Tile(
     app: AppEntry,
-    wide: Boolean,
-    pinned: Boolean,
-    height: Dp,
+    label: String,
+    color: Color,
+    size: Int,
+    unit: Dp,
+    gap: Dp,
+    editMode: Boolean,
+    selected: Boolean,
     onClick: () -> Unit,
-    onTogglePin: () -> Unit,
-    onToggleWide: () -> Unit,
-    onInfo: () -> Unit
+    onLongClick: () -> Unit
 ) {
-    var menu by remember { mutableStateOf(false) }
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.93f else 1f, label = "tilePress")
-    val theme = LocalLauncherTheme.current
-    val color = theme.tileColor(app.packageName).let { if (LocalHasWallpaper.current) it.copy(alpha = it.alpha * 0.85f) else it }
+    val target = when {
+        pressed -> 0.93f
+        editMode && !selected -> 0.9f
+        else -> 1f
+    }
+    val scale by animateFloatAsState(target, label = "tileScale")
+    val height = if (size == 2) unit * 2 + gap else unit
+    val iconSize = if (size == 2) unit * 0.6f else unit * 0.42f
 
     Box(
         Modifier
@@ -141,43 +232,33 @@ private fun Tile(
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-                rotationX = (1f - scale) * 60f   // efecto "tilt" de Windows Phone
+                rotationX = if (pressed) 6f else 0f   // efecto "tilt" de Windows Phone
+                alpha = if (editMode && !selected) 0.7f else 1f
             }
             .background(color)
+            .then(if (selected) Modifier.border(3.dp, Color.White) else Modifier)
             .combinedClickable(
                 interactionSource = interaction,
                 indication = null,
-                onLongClick = { menu = true },
+                onLongClick = onLongClick,
                 onClick = onClick
             )
     ) {
         Image(
             bitmap = app.icon,
-            contentDescription = app.label,
-            modifier = Modifier.align(if (wide) Alignment.CenterStart else Alignment.Center)
-                .padding(start = if (wide) 14.dp else 0.dp, bottom = 8.dp)
-                .size(height * 0.42f)
+            contentDescription = label,
+            modifier = Modifier
+                .align(if (size == 1) Alignment.CenterStart else Alignment.Center)
+                .padding(start = if (size == 1) 14.dp else 0.dp, bottom = 8.dp)
+                .size(iconSize)
         )
         Text(
-            app.label,
+            label,
             color = Color.White,
-            fontSize = 11.sp,
+            fontSize = if (size == 2) 14.sp else 11.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.align(Alignment.BottomStart).padding(start = 6.dp, end = 6.dp, bottom = 4.dp)
         )
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(
-                text = { Text(if (pinned) "Desanclar de inicio" else "Anclar a inicio") },
-                onClick = { menu = false; onTogglePin() }
-            )
-            if (pinned) {
-                DropdownMenuItem(
-                    text = { Text(if (wide) "Tamaño normal" else "Tamaño ancho") },
-                    onClick = { menu = false; onToggleWide() }
-                )
-            }
-            DropdownMenuItem(text = { Text("Información de la app") }, onClick = { menu = false; onInfo() })
-        }
     }
 }

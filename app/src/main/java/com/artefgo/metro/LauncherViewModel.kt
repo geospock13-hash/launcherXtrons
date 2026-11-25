@@ -12,8 +12,13 @@ import kotlinx.coroutines.Dispatchers
 import java.io.File
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.artefgo.metro.data.AppEntry
 import com.artefgo.metro.data.AppsRepository
+import com.artefgo.metro.data.COLOR_CHOICES
+import com.artefgo.metro.data.DEFAULT_WIDGETS
+import com.artefgo.metro.data.StartLayout
+import com.artefgo.metro.data.TileCfg
+import com.artefgo.metro.data.WidgetCfg
+import com.artefgo.metro.data.WidgetType
 import com.artefgo.metro.data.LocationRepository
 import com.artefgo.metro.data.MediaHub
 import com.artefgo.metro.data.ObdManager
@@ -123,19 +128,99 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
         restartObd()
     }
 
-    private fun currentPinned(): List<String> =
-        prefs.pinned.value ?: AppsRepository.defaultPinned(appsRepo.apps.value)
+    // ---------- Edición del panel izquierdo ----------
 
-    fun togglePin(app: AppEntry) {
-        val p = currentPinned().toMutableList()
-        if (app.packageName in p) p.remove(app.packageName) else p.add(app.packageName)
-        prefs.setPinned(p)
+    fun defaultTiles(): List<TileCfg> =
+        AppsRepository.defaultPinned(appsRepo.apps.value).mapIndexed { i, p -> TileCfg(p, if (i < 2) 1 else 0) }
+
+    /** Diseño actual con los anclados automáticos ya resueltos. */
+    private fun startNow(): StartLayout {
+        val l = prefs.start.value
+        return if (l.tiles != null) l else l.copy(tiles = defaultTiles())
     }
 
-    fun toggleWide(app: AppEntry) {
-        val w = (prefs.wide.value ?: currentPinned().take(2).toSet()).toMutableSet()
-        if (!w.add(app.packageName)) w.remove(app.packageName)
-        prefs.setWide(w)
+    private fun editTiles(block: (MutableList<TileCfg>) -> Unit) {
+        val l = startNow()
+        val t = l.tiles.orEmpty().toMutableList()
+        block(t)
+        prefs.setStart(l.copy(tiles = t))
+    }
+
+    fun isPinned(pkg: String) = startNow().tiles.orEmpty().any { it.pkg == pkg }
+
+    fun togglePin(pkg: String) = editTiles { t ->
+        if (t.any { it.pkg == pkg }) t.removeAll { it.pkg == pkg } else t.add(TileCfg(pkg))
+    }
+
+    fun moveTile(pkg: String, delta: Int) = editTiles { t ->
+        val i = t.indexOfFirst { it.pkg == pkg }
+        val j = i + delta
+        if (i >= 0 && j in t.indices) t.add(j, t.removeAt(i))
+    }
+
+    fun cycleTileSize(pkg: String) = editTiles { t ->
+        val i = t.indexOfFirst { it.pkg == pkg }
+        if (i >= 0) t[i] = t[i].copy(size = (t[i].size + 1) % 3)
+    }
+
+    fun cycleTileColor(pkg: String) {
+        val l = startNow()
+        val next = nextColor(l.colors[pkg])
+        prefs.setStart(l.copy(colors = if (next == null) l.colors - pkg else l.colors + (pkg to next)))
+    }
+
+    fun renameTile(pkg: String, label: String?) {
+        val l = startNow()
+        val clean = label?.trim().orEmpty()
+        prefs.setStart(l.copy(labels = if (clean.isEmpty()) l.labels - pkg else l.labels + (pkg to clean)))
+    }
+
+    fun hideApp(pkg: String) {
+        val l = startNow()
+        prefs.setStart(l.copy(tiles = l.tiles.orEmpty().filter { it.pkg != pkg }, hidden = l.hidden + pkg))
+    }
+
+    fun unhideApp(pkg: String) {
+        val l = startNow()
+        prefs.setStart(l.copy(hidden = l.hidden - pkg))
+    }
+
+    fun resetStart() = prefs.setStart(StartLayout())
+
+    // ---------- Edición del panel derecho ----------
+
+    private fun editWidgets(block: (MutableList<WidgetCfg>) -> Unit) {
+        val w = prefs.widgets.value.toMutableList()
+        block(w)
+        prefs.setWidgets(w)
+    }
+
+    fun moveWidget(index: Int, delta: Int) = editWidgets { w ->
+        val j = index + delta
+        if (index in w.indices && j in w.indices) w.add(j, w.removeAt(index))
+    }
+
+    fun cycleWidgetSpan(index: Int) = editWidgets { w ->
+        if (index in w.indices) w[index] = w[index].copy(span = if (w[index].span == 1) 2 else 1)
+    }
+
+    fun cycleWidgetColor(index: Int) = editWidgets { w ->
+        if (index in w.indices) w[index] = w[index].copy(color = nextColor(w[index].color))
+    }
+
+    fun removeWidget(index: Int) = editWidgets { w -> if (index in w.indices) w.removeAt(index) }
+
+    fun addWidget(type: WidgetType) = editWidgets { w ->
+        if (w.none { it.type == type }) w.add(WidgetCfg(type, type.defaultSpan))
+    }
+
+    fun resetWidgets() = prefs.setWidgets(DEFAULT_WIDGETS)
+
+    /** null (color del tema) → colores Metro → null. */
+    private fun nextColor(current: Long?): Long? {
+        val choices = COLOR_CHOICES
+        val i = if (current == null) -1 else choices.indexOf(current)
+        return if (i + 1 >= choices.size) null else choices[i + 1]
     }
 
     override fun onCleared() {

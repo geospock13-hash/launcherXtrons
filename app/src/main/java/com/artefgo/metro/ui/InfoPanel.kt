@@ -1,6 +1,29 @@
 package com.artefgo.metro.ui
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.graphicsLayer
+import com.artefgo.metro.data.WidgetCfg
+import com.artefgo.metro.data.WidgetType
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -64,9 +87,22 @@ private val ES = Locale.forLanguageTag("es-MX")
 private val HOUR_FMT = DateTimeFormatter.ofPattern("HH:mm")
 private val DATE_FMT = DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM", ES)
 
-/** Panel derecho: hora, clima, velocímetro, RPM, altitud, batería y la canción actual. */
+/** Acciones de edición de los widgets. */
+class WidgetActions(
+    val move: (Int, Int) -> Unit,
+    val cycleSpan: (Int) -> Unit,
+    val cycleColor: (Int) -> Unit,
+    val remove: (Int) -> Unit,
+    val add: (WidgetType) -> Unit
+)
+
+/** Panel derecho: widgets que se pueden mover, cambiar de tamaño/color, quitar y añadir. */
 @Composable
 fun InfoPanel(
+    widgets: List<WidgetCfg>,
+    editMode: Boolean,
+    onEditMode: (Boolean) -> Unit,
+    actions: WidgetActions,
     now: LocalDateTime,
     weather: Weather?,
     gps: GpsState,
@@ -79,60 +115,158 @@ fun InfoPanel(
 ) {
     val theme = LocalLauncherTheme.current
     val wp = LocalHasWallpaper.current
-    fun tile(key: String) = theme.tileColor(key).let { if (wp) it.copy(alpha = it.alpha * 0.85f) else it }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // Hora + clima
-        Row(verticalAlignment = Alignment.Top) {
-            Column(Modifier.weight(1f)) {
+    var selected by remember { mutableStateOf<Int?>(null) }
+    var addMenu by remember { mutableStateOf(false) }
+    LaunchedEffect(editMode) { if (!editMode) selected = null }
+
+    fun colorFor(cfg: WidgetCfg, key: String): Color =
+        (cfg.color?.let { Color(it) } ?: theme.tileColor(key)).let { if (wp) it.copy(alpha = it.alpha * 0.85f) else it }
+
+    val speed: Float? = obd.speedKmh?.toFloat() ?: gps.speedKmh
+
+    Column(modifier) {
+        if (editMode) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    now.format(HOUR_FMT), color = theme.text, fontSize = 58.sp,
-                    fontWeight = FontWeight.Thin, lineHeight = 60.sp
+                    "editar widgets", color = theme.text, fontSize = 24.sp, fontWeight = FontWeight.Light,
+                    modifier = Modifier.weight(1f)
                 )
-                Text(now.format(DATE_FMT).lowercase(ES), color = theme.subText, fontSize = 14.sp)
+                TextButton(onClick = { onEditMode(false) }) { Text("Listo", fontSize = 16.sp) }
             }
-            WeatherBox(weather)
+        }
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.weight(1f).fillMaxWidth()
+        ) {
+            itemsIndexed(
+                widgets,
+                key = { _, w -> w.type.name },
+                span = { _, w -> GridItemSpan(w.span) }
+            ) { i, w ->
+                WidgetFrame(
+                    editMode = editMode,
+                    selected = selected == i,
+                    onClick = {
+                        if (editMode) selected = i
+                        else if (w.type == WidgetType.MEDIA) onOpenMediaApp()
+                    },
+                    onLongClick = { onEditMode(true); selected = i }
+                ) {
+                    val bg = w.color?.let { Color(it) }
+                    when (w.type) {
+                        WidgetType.CLOCK -> Column(
+                            Modifier.fillMaxWidth().then(if (bg != null) Modifier.background(bg).padding(8.dp) else Modifier)
+                        ) {
+                            val big = if (w.span == 2) 58.sp else 44.sp
+                            Text(now.format(HOUR_FMT), color = theme.text, fontSize = big, fontWeight = FontWeight.Thin, lineHeight = big)
+                            Text(now.format(DATE_FMT).lowercase(ES), color = theme.subText, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        WidgetType.WEATHER -> Box(
+                            Modifier.fillMaxWidth().then(if (bg != null) Modifier.background(bg).padding(8.dp) else Modifier)
+                        ) {
+                            Box(Modifier.align(if (w.span == 1) Alignment.TopEnd else Alignment.TopStart)) { WeatherBox(weather) }
+                        }
+                        WidgetType.SPEED -> GaugeTile(
+                            "velocidad", speed?.roundToInt()?.toString() ?: "—", "km/h",
+                            (speed ?: 0f) / 200f, colorFor(w, "velocidad"), Modifier.fillMaxWidth()
+                        )
+                        WidgetType.RPM -> GaugeTile(
+                            "rpm", obd.rpm?.toString() ?: "—", "rev/min",
+                            (obd.rpm ?: 0) / 7000f, colorFor(w, "rpm"), Modifier.fillMaxWidth()
+                        )
+                        WidgetType.ALTITUDE -> StatTile(
+                            "altitud", gps.altitudeM?.roundToInt()?.toString() ?: "—", "m snm",
+                            colorFor(w, "altitud"), Modifier.fillMaxWidth()
+                        )
+                        WidgetType.BATTERY -> {
+                            val v = obd.voltage
+                            val c = when {
+                                w.color != null || v == null -> colorFor(w, "bateria")
+                                v < 12.0f -> Metro.Red
+                                v < 12.6f -> Metro.Amber
+                                else -> Metro.Teal
+                            }
+                            StatTile("batería", v?.let { String.format(Locale.US, "%.1f", it) } ?: "—", "V", c, Modifier.fillMaxWidth())
+                        }
+                        WidgetType.COOLANT -> StatTile(
+                            "motor", obd.coolantC?.toString() ?: "—", "°C", colorFor(w, "motor"), Modifier.fillMaxWidth()
+                        )
+                        WidgetType.OBD_STATUS -> Text(
+                            obd.status, color = if (bg != null) Color.White else theme.subText, fontSize = 11.sp,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth().then(if (bg != null) Modifier.background(bg).padding(6.dp) else Modifier)
+                        )
+                        WidgetType.MEDIA -> NowPlayingCard(media, hasMediaAccess, onGrantMedia, onOpenMediaApp, bg)
+                    }
+                }
+            }
         }
 
-        // Velocidad y RPM
-        val speed: Float? = obd.speedKmh?.toFloat() ?: gps.speedKmh
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            GaugeTile(
-                title = "velocidad", value = speed?.roundToInt()?.toString() ?: "—", unit = "km/h",
-                progress = (speed ?: 0f) / 200f, color = tile("velocidad"), modifier = Modifier.weight(1f)
+        if (editMode) {
+            val sel = selected?.takeIf { it in widgets.indices }
+            EditToolbar(
+                title = sel?.let { "Widget: ${widgets[it].type.title}" } ?: "Toca un widget para editarlo",
+                enabled = sel != null
+            ) {
+                if (sel != null) {
+                    ToolButton(Icons.Filled.KeyboardArrowUp, "Subir") {
+                        actions.move(sel, -1); selected = (sel - 1).coerceAtLeast(0)
+                    }
+                    ToolButton(Icons.Filled.KeyboardArrowDown, "Bajar") {
+                        actions.move(sel, 1); selected = (sel + 1).coerceAtMost(widgets.size - 1)
+                    }
+                    ToolButton(Icons.Filled.SwapHoriz, "Ancho") { actions.cycleSpan(sel) }
+                    ToolButton(Icons.Filled.Palette, "Color") { actions.cycleColor(sel) }
+                    ToolButton(Icons.Filled.Delete, "Quitar") { actions.remove(sel); selected = null }
+                }
+                val missing = WidgetType.entries.filter { t -> widgets.none { it.type == t } }
+                if (missing.isNotEmpty()) {
+                    Box {
+                        ToolButton(Icons.Filled.Add, "Añadir") { addMenu = true }
+                        DropdownMenu(expanded = addMenu, onDismissRequest = { addMenu = false }) {
+                            missing.forEach { t ->
+                                DropdownMenuItem(text = { Text(t.title) }, onClick = { actions.add(t); addMenu = false })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun WidgetFrame(
+    editMode: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .graphicsLayer { alpha = if (editMode && !selected) 0.7f else 1f }
+            .combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onLongClick = onLongClick,
+                onClick = onClick
             )
-            GaugeTile(
-                title = "rpm", value = obd.rpm?.toString() ?: "—", unit = "rev/min",
-                progress = (obd.rpm ?: 0) / 7000f, color = tile("rpm"), modifier = Modifier.weight(1f)
+    ) {
+        content()
+        if (editMode) {
+            // En modo edición una capa encima captura los toques (para no activar botones de música, etc.)
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .then(if (selected) Modifier.border(3.dp, Color.White) else Modifier)
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             )
         }
-
-        // Altitud y batería
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            StatTile(
-                title = "altitud", value = gps.altitudeM?.roundToInt()?.toString() ?: "—", unit = "m snm",
-                color = tile("altitud"), modifier = Modifier.weight(1f)
-            )
-            val v = obd.voltage
-            StatTile(
-                title = "batería",
-                value = v?.let { String.format(Locale.US, "%.1f", it) } ?: "—",
-                unit = "V",
-                color = when {
-                    v == null -> tile("bateria")
-                    v < 12.0f -> Metro.Red
-                    v < 12.6f -> Metro.Amber
-                    else -> Metro.Teal
-                },
-                modifier = Modifier.weight(1f)
-            )
-        }
-        Text(
-            obd.status + (obd.coolantC?.let { " · motor $it °C" } ?: ""),
-            color = theme.subText, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
-        )
-
-        Spacer(Modifier.weight(1f))
-        NowPlayingCard(media, hasMediaAccess, onGrantMedia, onOpenMediaApp)
     }
 }
 
@@ -215,10 +349,11 @@ private fun NowPlayingCard(
     media: NowPlaying?,
     hasAccess: Boolean,
     onGrant: () -> Unit,
-    onOpen: () -> Unit
+    onOpen: () -> Unit,
+    bg: Color? = null
 ) {
     val theme = LocalLauncherTheme.current
-    Column(Modifier.fillMaxWidth().background(theme.panel).padding(8.dp)) {
+    Column(Modifier.fillMaxWidth().background(bg ?: theme.panel).padding(8.dp)) {
         if (!hasAccess) {
             Text("reproduciendo", color = Metro.Cyan, fontSize = 12.sp)
             Text(

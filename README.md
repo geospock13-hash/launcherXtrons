@@ -16,6 +16,8 @@ En configuración → **tema** hay **50 temas**:
 
 En **fondo con imagen** puedes poner una foto tuya de fondo y ajustar cuánto se oscurece. El tema sigue dando el color de los mosaicos.
 
+**Editar:** mantén presionado un mosaico o widget (o toca el lápiz) para moverlo, cambiarle tamaño o color, renombrarlo, ocultarlo, quitarlo o añadir widgets.
+
 Toca el carro (o el engrane) para elegir **marca, tipo (sedán, hatchback, SUV, mini SUV) y color**. También hay una opción para previsualizar cualquier hora del día.
 
 ## Compilar el APK (sin instalar nada)

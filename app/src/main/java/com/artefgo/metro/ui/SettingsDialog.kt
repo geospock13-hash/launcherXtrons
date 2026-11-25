@@ -66,6 +66,8 @@ fun SettingsDialog(
     val obdAddr by vm.prefs.obdAddress.collectAsStateWithLifecycle()
     val devices = remember { vm.obd.pairedDevices() }
     val themeId by vm.prefs.themeId.collectAsStateWithLifecycle()
+    val start by vm.prefs.start.collectAsStateWithLifecycle()
+    val apps by vm.appsRepo.apps.collectAsStateWithLifecycle()
     val bgImage by vm.bgImage.collectAsStateWithLifecycle()
     val bgDim by vm.prefs.bgDim.collectAsStateWithLifecycle()
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -173,6 +175,27 @@ fun SettingsDialog(
             }
             if (devices.isEmpty()) {
                 Text("No hay dispositivos Bluetooth emparejados (o falta el permiso).", color = Metro.SubText, fontSize = 12.sp)
+            }
+
+            Section("inicio y widgets")
+            Text(
+                "Mantén presionado un mosaico o widget (o toca el lápiz) para moverlo, cambiar tamaño o color, renombrarlo, ocultarlo o quitarlo.",
+                color = Metro.SubText, fontSize = 13.sp
+            )
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Chip("Restablecer inicio", false) { vm.resetStart() }
+                Chip("Restablecer widgets", false) { vm.resetWidgets() }
+            }
+            if (start.hidden.isNotEmpty()) {
+                Text("Apps ocultas (toca para mostrarla otra vez):", color = Metro.SubText, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                Spacer(Modifier.height(4.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(start.hidden.toList()) { pkg ->
+                        val name = apps.firstOrNull { it.packageName == pkg }?.label ?: pkg
+                        Chip(name, false) { vm.unhideApp(pkg) }
+                    }
+                }
             }
 
             Section("sistema")

@@ -60,6 +60,11 @@ class AppsRepository(private val context: Context) {
         runCatching { context.startActivity(i) }
     }
 
+    fun uninstall(pkg: String) {
+        val i = Intent(Intent.ACTION_DELETE, Uri.parse("package:$pkg")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(i) }
+    }
+
     companion object {
         /** Apps típicas de la radio que se anclan arriba la primera vez. */
         private val KEYWORDS = listOf(

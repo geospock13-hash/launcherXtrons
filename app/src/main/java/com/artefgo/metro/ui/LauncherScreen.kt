@@ -47,6 +47,7 @@ fun LauncherScreen(vm: LauncherViewModel) {
     val context = LocalContext.current
     var showSettings by remember { mutableStateOf(false) }
     var timeOverride by remember { mutableStateOf<Float?>(null) }
+    var editMode by remember { mutableStateOf(false) }
 
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         vm.onPermissionsResult()
@@ -61,11 +62,11 @@ fun LauncherScreen(vm: LauncherViewModel) {
         if (missing.isNotEmpty()) permLauncher.launch(missing.toTypedArray())
     }
     // El botón "atrás" nunca sale del launcher; solo cierra la configuración.
-    BackHandler { showSettings = false }
+    BackHandler { showSettings = false; editMode = false }
 
     val apps by vm.appsRepo.apps.collectAsStateWithLifecycle()
-    val pinned by vm.prefs.pinned.collectAsStateWithLifecycle()
-    val wide by vm.prefs.wide.collectAsStateWithLifecycle()
+    val start by vm.prefs.start.collectAsStateWithLifecycle()
+    val widgets by vm.prefs.widgets.collectAsStateWithLifecycle()
     val car by vm.prefs.car.collectAsStateWithLifecycle()
     val gps by vm.location.state.collectAsStateWithLifecycle()
     val obd by vm.obd.state.collectAsStateWithLifecycle()
@@ -104,12 +105,23 @@ fun LauncherScreen(vm: LauncherViewModel) {
         ) {
             TilesPanel(
                 apps = apps,
-                pinned = pinned,
-                wide = wide,
-                onLaunch = { vm.appsRepo.launch(it) },
-                onTogglePin = { vm.togglePin(it) },
-                onToggleWide = { vm.toggleWide(it) },
-                onInfo = { vm.appsRepo.openAppInfo(it) },
+                layout = start,
+                defaultTiles = remember(apps) { vm.defaultTiles() },
+                editMode = editMode,
+                onEditMode = { editMode = it },
+                actions = remember {
+                    TileActions(
+                        launch = { vm.appsRepo.launch(it) },
+                        togglePin = vm::togglePin,
+                        move = vm::moveTile,
+                        cycleSize = vm::cycleTileSize,
+                        cycleColor = vm::cycleTileColor,
+                        rename = vm::renameTile,
+                        hide = vm::hideApp,
+                        uninstall = { vm.appsRepo.uninstall(it) },
+                        info = { vm.appsRepo.openAppInfo(it) }
+                    )
+                },
                 onOpenSettings = { showSettings = true },
                 modifier = Modifier.weight(0.31f).fillMaxHeight()
             )
@@ -125,6 +137,18 @@ fun LauncherScreen(vm: LauncherViewModel) {
                     .clickable { showSettings = true }
             )
             InfoPanel(
+                widgets = widgets,
+                editMode = editMode,
+                onEditMode = { editMode = it },
+                actions = remember {
+                    WidgetActions(
+                        move = vm::moveWidget,
+                        cycleSpan = vm::cycleWidgetSpan,
+                        cycleColor = vm::cycleWidgetColor,
+                        remove = vm::removeWidget,
+                        add = vm::addWidget
+                    )
+                },
                 now = now,
                 weather = weather,
                 gps = gps,
